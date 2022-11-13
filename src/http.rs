@@ -42,7 +42,7 @@ pub async fn handle_tx(
     req: Json<NewTxRequestBody>,
     data: Data<Arc<Mutex<AppData>>>
 ) -> impl Responder {
-    let AppData { db, ledger } = &*data.lock().expect("failed to lock app data mutex");
+    let AppData { db, ledger } = &mut *data.lock().expect("failed to lock app data mutex");
     let NewTxRequestBody { amt, from_addr, to_addr, secret } = req.into_inner();
 
     if let None = db.fetch_by_addr(&to_addr).await {
@@ -76,4 +76,11 @@ pub async fn handle_addr(
                 justification: "'first_name', 'last_name', or both must be specified. Found none.",
             }),
     }
+}
+
+pub async fn get_txs(data: Data<Arc<Mutex<AppData>>>) -> impl Responder {
+    let AppData { ledger, .. } = &mut *data.lock().expect("failed to lock!");
+    ledger.compute_balances();
+
+    HttpResponse::Ok().body("done")
 }

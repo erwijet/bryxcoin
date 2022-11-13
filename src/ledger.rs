@@ -1,4 +1,11 @@
-use std::{ ops::Add, fs, path::{ PathBuf, Path } };
+use core::panic;
+use std::{
+    ops::{Add, Sub},
+    fs::{ self, DirEntry },
+    path::{ PathBuf, Path },
+    collections::HashMap,
+    borrow::Borrow
+};
 use git2::{
     Repository,
     RemoteCallbacks,
@@ -9,9 +16,12 @@ use git2::{
     ObjectType,
     Commit,
     Signature,
+    TreeWalkResult,
 };
 use serde::Serialize;
-use SyncDirec::{FromRemote, ToRemote};
+use SyncDirec::{ FromRemote, ToRemote };
+
+use crate::BANK_ADDR;
 
 pub fn get_ledger_repo_path() -> PathBuf {
     std::env::current_dir().expect("could not get current directory").join("ledger")
@@ -22,7 +32,6 @@ enum SyncDirec {
     ToRemote,
 }
 
-
 #[derive(Serialize)]
 pub struct Tx {
     pub from_addr: String,
@@ -32,7 +41,7 @@ pub struct Tx {
 
 impl Tx {
     pub fn new(from_addr: &str, to_addr: &str, amt: u32) -> Self {
-        Tx { from_addr: from_addr.to_owned(), to_addr: to_addr.to_owned(), amt }
+        Self { from_addr: from_addr.to_owned(), to_addr: to_addr.to_owned(), amt }
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
@@ -41,8 +50,8 @@ impl Tx {
             .map(|part| part.trim())
             .collect::<Vec<&str>>();
 
-        if let ([from_addr, to_addr], Ok(amt)) = (&parts[0..1], parts[2].parse::<u32>()) {
-            Some(Tx::new(from_addr, *to_addr, amt))
+        if let (from_addr, to_addr, Ok(amt)) = (parts[0], parts[1], parts[2].parse::<u32>()) {
+            Some(Self::new(from_addr, to_addr, amt))
         } else {
             None
         }
@@ -63,6 +72,7 @@ impl std::fmt::Display for Tx {
 
 pub struct Ledger {
     pub repo: Repository,
+    pub balances: HashMap<String, u32>,
 }
 
 impl Ledger {
@@ -88,10 +98,54 @@ impl Ledger {
         let path = get_ledger_repo_path();
         let repo = builder.clone(crate::REMOTE, &path).expect("failed to clone repo!");
 
-        Ledger { repo }
+        Self { repo, balances: HashMap::new() }
     }
 
-    fn sync(&self, direction: SyncDirec) {
+
+
+    pub fn compute_balances(&mut self) {
+        let Self { repo, balances } = self;
+
+        let mut ents = fs
+            ::read_dir(get_ledger_repo_path())
+            .expect("failed to read from ledger directory")
+            .map(|res| res.map(|e| e.path()))
+            .collect::<Result<Vec<PathBuf>, std::io::Error>>().unwrap();
+
+        ents.sort();
+
+        for ent in ents {
+            if ent.is_dir() { continue; }
+
+            let tx = Tx::from_str(
+                fs
+                    ::read_to_string(&ent)
+                    .expect("could not read from local ledger copy!")
+                    .borrow()
+            ).expect("polluted/invalid tx file! failed to deseralize into Tx");
+            let sender_balance = *balances.get(&tx.from_addr).unwrap_or(&0u32);
+            let recv_balance = *balances.get(&tx.to_addr).unwrap_or(&0u32);
+
+            balances.insert(tx.to_addr, recv_balance + tx.amt);
+
+            // psudo-address "bank"; no further logic required
+            if tx.from_addr == BANK_ADDR { continue; }
+
+            if sender_balance < tx.amt {
+                panic!(
+                    "polluted ledger! @tx{}, balance of addr: {} is {}, but this tx denotes a withdrawl of {}, making their balance negative!",
+                    ent.display(),
+                    tx.from_addr,
+                    sender_balance,
+                    tx.amt
+                );
+            }
+
+            balances.insert(tx.from_addr, sender_balance - tx.amt);
+        }
+    }
+
+    fn sync(&mut self, direction: SyncDirec) {
         let mut cbs = RemoteCallbacks::new();
 
         cbs.credentials(|_, _, _| {
@@ -144,7 +198,7 @@ impl Ledger {
             .expect("could not parse message from last commit to u32")
     }
 
-    pub fn new_tx(&self, tx: &Tx) {
+    pub fn new_tx(&mut self, tx: &Tx) {
         let tx_idx = &self.get_last_tx_idx() + 1;
         let path = get_ledger_repo_path().join(tx_idx.to_string().add(".tx"));
 

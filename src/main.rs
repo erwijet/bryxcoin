@@ -9,13 +9,24 @@ mod ledger;
 mod http;
 
 const REMOTE: &str = "git@github.com:bryxcoin/ledger.git";
+const BANK_ADDR: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    let db = DB::init().await.expect("failed to establish a connection with mongodb");
+
+    let mut ledger = Ledger::init();
+    ledger.compute_balances();
+
+
+    for (k, v) in &ledger.balances {
+        println!("{}: {} bxcn", k, v);
+    }
+
     let data = Arc::new(
         Mutex::new(http::AppData {
-            ledger: Ledger::init(),
-            db: DB::init().await.expect("failed to establish connection with mongodb"),
+            ledger,
+            db,
         })
     );
 
@@ -28,6 +39,7 @@ async fn main() -> std::io::Result<()> {
             )
             .route("/tx", web::post().to(http::handle_tx))
             .route("/addr", web::get().to(http::handle_addr))
+            .route("/balances", web::get().to(http::get_txs) )
     })
         .bind(("0.0.0.0", 8080))?
         .run().await
