@@ -432,7 +432,6 @@ name = "bryxcoin"
 version = "0.1.0"
 dependencies = [
  "actix-web",
- "chrono",
  "futures",
  "git2",
  "mongodb",
@@ -522,7 +521,6 @@ dependencies = [
  "js-sys",
  "num-integer",
  "num-traits",
- "serde",
  "time 0.1.44",
  "wasm-bindgen",
  "winapi 0.3.9",
