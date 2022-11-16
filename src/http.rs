@@ -1,9 +1,10 @@
-use actix_web::{ Responder, HttpResponse, web::{ Json, Data } };
+use actix_web::{ Responder, HttpResponse, web::{ Json, Data, Query } };
+use mongodb::bson::doc;
 use serde::{ Deserialize, Serialize };
 use std::sync::{ Arc, Mutex };
 
-use crate::ledger::{Ledger, Tx};
-use crate::db::{DB, User};
+use crate::ledger::{ Ledger, Tx };
+use crate::db::{ DB, User };
 
 pub struct AppData {
     pub db: DB,
@@ -63,19 +64,40 @@ pub async fn handle_tx(
     }
 }
 
-pub async fn handle_addr(
-    req: Json<AddrLookupRequestBody>,
+pub async fn handle_users(
+    req: Query<AddrLookupRequestBody>,
     data: Data<Arc<Mutex<AppData>>>
 ) -> impl Responder {
-    match (&req.first_name, &req.last_name) {
-        (Some(first_name), Some(last_name)) => HttpResponse::Ok().body("first and last"),
-        (Some(first_name), None) => HttpResponse::Ok().body("first"),
-        (None, Some(last_name)) => HttpResponse::Ok().body("last"),
-        (None, None) =>
-            HttpResponse::BadRequest().json(RequestFailure {
-                justification: "'first_name', 'last_name', or both must be specified. Found none.",
-            }),
+    let AppData { db, .. } = &*data.lock().expect("failed to lock app data mutex");
+
+    let filter = match (&req.first_name, &req.last_name) {
+        (Some(first_name), Some(last_name)) =>
+            Some(
+                doc! {
+                    "first_name": first_name,
+                    "last_name": last_name
+                }
+            ),
+        (Some(first_name), None) => Some(doc! { "first_name": first_name }),
+        (None, Some(last_name)) => Some(doc! { "last_name": last_name }),
+        (None, None) => None,
+    };
+
+    if filter == None {
+        return reject("specify at least one of the following: 'first_name', 'last_name'");
     }
+
+    HttpResponse::Ok().json(Users {
+        users: db
+            .fetch_users(filter).await
+            .expect("failed to query against the users collection")
+            .into_iter()
+            .map(|mut u| {
+                u.bryxcoin_password = "<<REDACTED>>".to_owned();
+                return u;
+            })
+            .collect(),
+    })
 }
 
 pub async fn get_txs(data: Data<Arc<Mutex<AppData>>>) -> impl Responder {

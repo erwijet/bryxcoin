@@ -38,7 +38,7 @@ async fn main() -> std::io::Result<()> {
                 web::get().to(|| HttpResponse::Ok().body("ok"))
             )
             .route("/tx", web::post().to(http::handle_tx))
-            .route("/addr", web::get().to(http::handle_addr))
+            .route("/users", web::get().to(http::handle_users))
             .route("/balances", web::get().to(http::get_txs) )
     })
         .bind(("0.0.0.0", 8080))?

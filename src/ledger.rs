@@ -1,11 +1,5 @@
 use core::panic;
-use std::{
-    ops::{Add, Sub},
-    fs::{ self, DirEntry },
-    path::{ PathBuf, Path },
-    collections::HashMap,
-    borrow::Borrow
-};
+use std::{ ops::Add, fs, path::{ PathBuf, Path }, collections::HashMap, borrow::Borrow };
 use git2::{
     Repository,
     RemoteCallbacks,
@@ -16,7 +10,6 @@ use git2::{
     ObjectType,
     Commit,
     Signature,
-    TreeWalkResult,
 };
 use serde::Serialize;
 use SyncDirec::{ FromRemote, ToRemote };
@@ -55,10 +48,6 @@ impl Tx {
         } else {
             None
         }
-    }
-
-    pub fn write_to_file(&self, path: PathBuf) -> Result<(), std::io::Error> {
-        fs::write(path, format!("{}", &self))
     }
 }
 
@@ -101,27 +90,25 @@ impl Ledger {
         Self { repo, balances: HashMap::new() }
     }
 
-
-
     pub fn compute_balances(&mut self) {
-        let Self { repo, balances } = self;
+        let Self { balances, .. } = self;
 
         let mut ents = fs
             ::read_dir(get_ledger_repo_path())
             .expect("failed to read from ledger directory")
             .map(|res| res.map(|e| e.path()))
-            .collect::<Result<Vec<PathBuf>, std::io::Error>>().unwrap();
+            .collect::<Result<Vec<PathBuf>, std::io::Error>>()
+            .unwrap();
 
         ents.sort();
 
         for ent in ents {
-            if ent.is_dir() { continue; }
+            if ent.is_dir() {
+                continue;
+            }
 
             let tx = Tx::from_str(
-                fs
-                    ::read_to_string(&ent)
-                    .expect("could not read from local ledger copy!")
-                    .borrow()
+                fs::read_to_string(&ent).expect("could not read from local ledger copy!").borrow()
             ).expect("polluted/invalid tx file! failed to deseralize into Tx");
             let sender_balance = *balances.get(&tx.from_addr).unwrap_or(&0u32);
             let recv_balance = *balances.get(&tx.to_addr).unwrap_or(&0u32);
@@ -129,7 +116,9 @@ impl Ledger {
             balances.insert(tx.to_addr, recv_balance + tx.amt);
 
             // psudo-address "bank"; no further logic required
-            if tx.from_addr == BANK_ADDR { continue; }
+            if tx.from_addr == BANK_ADDR {
+                continue;
+            }
 
             if sender_balance < tx.amt {
                 panic!(
