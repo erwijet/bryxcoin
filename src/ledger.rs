@@ -1,5 +1,5 @@
-use core::panic;
-use std::{ ops::Add, fs, path::{ PathBuf, Path }, collections::HashMap, borrow::Borrow };
+use core::str;
+use std::{ ops::Add, fs, path::{ PathBuf, Path }, collections::HashMap };
 use git2::{
     Repository,
     RemoteCallbacks,
@@ -14,10 +14,18 @@ use git2::{
 use serde::Serialize;
 use SyncDirec::{ FromRemote, ToRemote };
 
-use crate::BANK_ADDR;
+use crate::{BANK_ADDR, skip_if};
 
 pub fn get_ledger_repo_path() -> PathBuf {
     std::env::current_dir().expect("could not get current directory").join("ledger")
+}
+
+fn get_privkey_path() -> PathBuf {
+    Path::new(&std::env::var("PRIV_KEY").expect("Must specify a PRIV_KEY enviornment variable")).to_path_buf()
+}
+
+fn get_pubkey_path() -> PathBuf {
+    Path::new(&std::env::var("PUB_KEY").expect("Must specify a PRIV_KEY env var")).to_path_buf()
 }
 
 enum SyncDirec {
@@ -73,8 +81,8 @@ impl Ledger {
         cbs.credentials(|_, _, _| {
             let creds = Cred::ssh_key(
                 "git",
-                Some(Path::new("/Users/tyler/.ssh/id_ed25519.pub")),
-                Path::new(&format!("{}/.ssh/id_ed25519", std::env::var("HOME").unwrap())),
+                Some(&get_pubkey_path()),
+                &get_privkey_path(),
                 None
             ).expect("failed to create credentials object");
 
@@ -92,6 +100,7 @@ impl Ledger {
 
     pub fn compute_balances(&mut self) {
         let Self { balances, .. } = self;
+        balances.clear();
 
         let mut ents = fs
             ::read_dir(get_ledger_repo_path())
@@ -103,12 +112,10 @@ impl Ledger {
         ents.sort();
 
         for ent in ents {
-            if ent.is_dir() {
-                continue;
-            }
+            skip_if!(ent.is_dir());
 
             let tx = Tx::from_str(
-                fs::read_to_string(&ent).expect("could not read from local ledger copy!").borrow()
+                &fs::read_to_string(&ent).expect("could not read from local ledger copy")
             ).expect("polluted/invalid tx file! failed to deseralize into Tx");
             let sender_balance = *balances.get(&tx.from_addr).unwrap_or(&0u32);
             let recv_balance = *balances.get(&tx.to_addr).unwrap_or(&0u32);
@@ -116,9 +123,7 @@ impl Ledger {
             balances.insert(tx.to_addr, recv_balance + tx.amt);
 
             // psudo-address "bank"; no further logic required
-            if tx.from_addr == BANK_ADDR {
-                continue;
-            }
+            skip_if!(tx.from_addr == BANK_ADDR);
 
             if sender_balance < tx.amt {
                 panic!(
@@ -140,8 +145,8 @@ impl Ledger {
         cbs.credentials(|_, _, _| {
             let creds = Cred::ssh_key(
                 "git",
-                Some(Path::new("/Users/tyler/.ssh/id_ed25519.pub")),
-                Path::new(&format!("{}/.ssh/id_ed25519", std::env::var("HOME").unwrap())),
+                Some(&get_pubkey_path()),
+                &get_privkey_path(),
                 None
             ).expect("failed to create credentials object");
 
@@ -198,6 +203,7 @@ impl Ledger {
             "failed to commit tx to git tree"
         );
 
+        self.compute_balances();
         self.sync(ToRemote);
     }
 
@@ -210,6 +216,24 @@ impl Ledger {
         let parent_commit = self.get_last_commit()?;
         let tree = self.repo.find_tree(oid)?;
 
-        self.repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[&parent_commit])
+        // let commit_buf = self.repo.commit_create_buffer(
+        //     &signature, &signature, message, &tree, &[&parent_commit])
+        //     .expect("failed to create commit buffer");
+
+        // let key_buf = fs::read(get_privkey_path()).expect("failed to read specified PRIV_KEY");
+        // let commit_str = from_utf8(&commit_buf).unwrap().to_string();
+        // let key = PrivateKey::from_openssh(key_buf).expect("failed to load specified PRIV_KEY");
+
+        // let ssh_sig = key.sign("git", ssh_key::HashAlg::Sha256, commit_str.as_bytes()).expect("failed to sign commit buffer");
+        // let commit = self.repo.commit_signed(&commit_str, &ssh_sig.to_pem(ssh_key::LineEnding::LF).expect("failed to extract PEM from sshsig"), Some("sshsig"))?;
+
+        // println!("{}, {}, {:?}", commit_str, ssh_sig.borrow().to_pem(ssh_key::LineEnding::LF).unwrap(), path.to_str());
+
+        // self.repo.set_head_detached(commit)?;
+        // self.repo.branch("master", &self.repo.find_commit(commit)?, true)?;
+        // self.repo.set_head("refs/heads/master")?;
+
+        self.repo.commit(Some("HEAD"), &signature, &signature, &message, &tree, &[&parent_commit])
+
     }
 }

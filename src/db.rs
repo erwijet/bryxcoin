@@ -1,23 +1,14 @@
 use std::str;
 
 use futures::StreamExt;
-use mongodb::bson::Bson;
-use mongodb::bson::document::ValueAccessError;
 use mongodb::bson::{ doc, document::Document };
 use mongodb::{ options::ClientOptions, Client, Collection };
 use serde::{ Serialize, Deserialize };
-use serde_json::Value;
 
 type MongoResult<T> = std::result::Result<T, mongodb::error::Error>;
 
 const DB_NAME: &str = "bagelbot";
 const COLL: &str = "users";
-
-const FIRST_NAME: &str = "first_name";
-const LAST_NAME: &str = "last_name";
-
-const BRYXCOIN_ADDRESS: &str = "bryxcoin_address";
-const BRYXCOIN_PASSWORD: &str = "bryxcoin_password";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct User {
@@ -77,20 +68,11 @@ impl DB {
 
 impl Into<User> for Document {
     fn into(self) -> User {
-        let mut vals = [
-                "first_name",
-                "last_name",
-                "bryxcoin_address",
-                "bryxcoin_password",
-            ];
-        vals = vals.
-                .into_iter()
-                .map(|s| self.get_str(s))
-                .collect::<Result<Vec<&str>, ValueAccessError>>();
-        {
-            User { first_name: **first_name, last_name: **last_name, bryxcoin_address: **bryxcoin_address, bryxcoin_password: **bryxcoin_password }
-        } else {
-            panic!("failed to convert Document into User");
+        User {
+            first_name: self.get_str("first_name").expect("failed to access value 'first_name'").to_owned(),
+            last_name: self.get_str("last_name").expect("failed to access value 'last_name'").to_owned(),
+            bryxcoin_address: self.get_str("bryxcoin_address").expect("failed to access value 'bryxcoin_address'").to_owned(),
+            bryxcoin_password: self.get_str("bryxcoin_password").expect("failed to access value 'bryxcoin_password'").to_owned()
         }
     }
 }

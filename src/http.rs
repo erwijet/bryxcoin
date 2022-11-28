@@ -1,14 +1,15 @@
-use actix_web::{ Responder, HttpResponse, web::{ Json, Data, Query } };
+use actix_web::{ web::{ Data, Json, Query }, HttpResponse, Responder };
 use mongodb::bson::doc;
 use serde::{ Deserialize, Serialize };
-use std::sync::{ Arc, Mutex };
+use std::{ collections::HashMap, sync::{ Arc, Mutex } };
 
+use crate::{db::{ User, DB }, settings::Settings};
 use crate::ledger::{ Ledger, Tx };
-use crate::db::{ DB, User };
 
 pub struct AppData {
     pub db: DB,
     pub ledger: Ledger,
+    pub settings: Settings
 }
 
 #[derive(Deserialize)]
@@ -27,7 +28,13 @@ pub struct AddrLookupRequestBody {
 
 #[derive(Serialize)]
 struct RequestFailure<'a> {
+    status: &'a str,
     justification: &'a str,
+}
+
+#[derive(Serialize)]
+struct TxLedgerResponseBody {
+    ledger: HashMap<String, u32>,
 }
 
 #[derive(Serialize)]
@@ -35,8 +42,11 @@ struct Users {
     users: Vec<User>,
 }
 
-fn reject(msg: &str) -> HttpResponse {
-    HttpResponse::BadRequest().json(RequestFailure { justification: msg })
+fn reject(justification: &str) -> HttpResponse {
+    HttpResponse::BadRequest().json(RequestFailure {
+        status: "fail",
+        justification,
+    })
 }
 
 pub async fn handle_tx(
@@ -46,7 +56,7 @@ pub async fn handle_tx(
     let AppData { db, ledger } = &mut *data.lock().expect("failed to lock app data mutex");
     let NewTxRequestBody { amt, from_addr, to_addr, secret } = req.into_inner();
 
-    if let None = db.fetch_by_addr(&to_addr).await {
+    if db.fetch_by_addr(&to_addr).await.is_none() {
         return reject("no recieving user could be found with the provided address");
     }
 
@@ -55,12 +65,21 @@ pub async fn handle_tx(
         (_, None) => reject("could not find recipient with address provided"),
         (Some(User { bryxcoin_password, .. }), _) if bryxcoin_password != secret =>
             reject("invalid secret"),
-        _ => {
-            let tx = Tx { amt, from_addr, to_addr };
-            ledger.new_tx(&tx);
+        (Some(User { bryxcoin_address, .. }), _) =>
+            match ledger.balances.get(&bryxcoin_address) {
+                None => reject("specified sender address has no balance"),
+                Some(bal) if *bal < amt => reject("specified sender address has insuffient funds"),
+                Some(_) => {
+                    let tx = Tx {
+                        amt,
+                        from_addr,
+                        to_addr,
+                    };
 
-            HttpResponse::Created().json(&tx)
-        }
+                    ledger.new_tx(&tx);
+                    HttpResponse::Created().json(&tx)
+                }
+            }
     }
 }
 
@@ -74,9 +93,9 @@ pub async fn handle_users(
         (Some(first_name), Some(last_name)) =>
             Some(
                 doc! {
-                    "first_name": first_name,
-                    "last_name": last_name
-                }
+            "first_name": first_name,
+            "last_name": last_name
+        }
             ),
         (Some(first_name), None) => Some(doc! { "first_name": first_name }),
         (None, Some(last_name)) => Some(doc! { "last_name": last_name }),
@@ -102,7 +121,7 @@ pub async fn handle_users(
 
 pub async fn get_txs(data: Data<Arc<Mutex<AppData>>>) -> impl Responder {
     let AppData { ledger, .. } = &mut *data.lock().expect("failed to lock!");
-    ledger.compute_balances();
-
-    HttpResponse::Ok().body("done")
+    HttpResponse::Ok().json(TxLedgerResponseBody {
+        ledger: ledger.balances.clone(),
+    })
 }

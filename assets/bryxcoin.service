@@ -1,0 +1,11 @@
+[Unit]
+Description=bryxcoin ledger server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/bryxcoin
+Type=exec
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

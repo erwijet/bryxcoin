@@ -13,3 +13,17 @@ futures = { version = "0.3.4", default-features = false, features = ["async-awai
 mongodb = "1.0.0"
 actix-web = "3.3.2"
 git2 = "0.15.0"
+ssh-key = { version = "0.5.1", features = ["alloc", "ed25519"] }
+config = { version = "0.13.2" }
+
+[package.metadata.deb]
+maintainer = "Tyler Holewinski <erwijet@gmail.com>"
+depends = "$auto, systemd"
+conf-files = ["/usr/local/etc/bryxcoin.conf", "/etc/systemd/system/bryxcoin.service"]
+section = "admin"
+priority = "optional"
+assets = [
+    ["target/release/bryxcoin", "/usr/local/bin/", "775"],
+    ["assets/bryxcoin.conf", "/usr/local/etc/", "644"],
+    ["assets/bryxcoin.service", "/etc/systemd/system/", "644"]
+]

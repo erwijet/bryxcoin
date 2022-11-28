@@ -7,6 +7,8 @@ use actix_web::{ HttpResponse, HttpServer, App, web::{ self, Data } };
 mod db;
 mod ledger;
 mod http;
+mod macros;
+mod settings;
 
 const REMOTE: &str = "git@github.com:bryxcoin/ledger.git";
 const BANK_ADDR: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -30,6 +32,12 @@ async fn main() -> std::io::Result<()> {
         })
     );
 
+    let settings = settings::Settings::new().unwrap();
+    println!("{}", settings.ledger_repo);
+    println!("{}", settings.mongo_connection_string);
+    println!("{}", settings.mongo_user_collection);
+    println!("{}", settings.mongo_user_database);
+
     HttpServer::new(move || {
         App::new()
             .app_data(Data::new(data.clone()))
@@ -39,7 +47,7 @@ async fn main() -> std::io::Result<()> {
             )
             .route("/tx", web::post().to(http::handle_tx))
             .route("/users", web::get().to(http::handle_users))
-            .route("/balances", web::get().to(http::get_txs) )
+            .route("/ledger", web::get().to(http::get_txs) )
     })
         .bind(("0.0.0.0", 8080))?
         .run().await
